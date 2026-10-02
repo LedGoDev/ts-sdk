@@ -1,6 +1,6 @@
 {
   "name": "@ledgo/sdk",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "SDK for LedGo platform integrations",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
