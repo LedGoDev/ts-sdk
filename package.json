@@ -19,6 +19,10 @@
   ],
   "author": "ledgo",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/LedGoDev/ts-sdk.git"
+  },
   "dependencies": {},
   "devDependencies": {
     "@types/jest": "^29.5.5",
