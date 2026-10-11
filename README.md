@@ -474,29 +474,52 @@ await ledgo.widgets.deleteWidgets([widgetId, otherWidgetId]);
 
 ## Comments
 
-Cross-cutting comments anchored to a root resource — a database or a document — and to one of its fine-grained targets: the resource itself, a column, a record, a cell, or a document block. Reading and creating require view access on the root resource; editing and deleting only affect your own comments.
+Cross-cutting comments anchored to a root resource — a database, a kanban, a form, or a document — and to one of its fine-grained targets: the resource itself, a column, a record, a cell, a kanban card, a form response, or a document block. Reading and creating require view access on the root resource; editing and deleting only affect your own comments.
+
+| Root resource | Anchors (`target.kind`) | List / create |
+| --- | --- | --- |
+| Database | `database`, `column`, `record`, `cell` | `listForDatabase` / `createForDatabase` |
+| Kanban | `card` | `listForKanban` / `createForKanban` |
+| Form | `response` | `listForForm` / `createForForm` |
+| Document | `block` | `listForDocument` / `createForDocument` |
 
 ```typescript
-// List the comments of a database, optionally filtered to one target key
+// Databases: list the comments, optionally filtered to one target key
 const comments = await ledgo.comments.listForDatabase(db.id, 'cell:email:record-123');
 
-// Create a top-level comment or a reply anchored to a database target
+// Databases: create a top-level comment or a reply
 await ledgo.comments.createForDatabase(db.id, {
   target: { kind: 'record', recordId: recordId },
   body: 'This record needs review',
   parentId: null, // pass the parent comment id to reply
 });
 
-// Same for documents
+// Kanbans: comments are anchored to a card
+const cardComments = await ledgo.comments.listForKanban(dashboard.id, 'kanban:' + dashboard.id + ':card:' + cardId);
+await ledgo.comments.createForKanban(dashboard.id, {
+  target: { kind: 'card', cardId },
+  body: 'This card is blocked',
+});
+
+// Forms: comments are anchored to a response
+const responseComments = await ledgo.comments.listForForm(form.id);
+await ledgo.comments.createForForm(form.id, {
+  target: { kind: 'response', responseId },
+  body: 'Please follow up on this submission',
+});
+
+// Documents: comments are anchored to a block
 const docComments = await ledgo.comments.listForDocument(doc.id);
 await ledgo.comments.createForDocument(doc.id, {
-  target: { kind: 'block', blockId: blockId },
+  target: { kind: 'block', blockId },
   body: 'Please expand this section',
 });
 
-// Update and delete own comments
-await ledgo.comments.update(commentId, 'New body text');
-await ledgo.comments.remove(commentId);
+// Update and delete own comments. The optional rootType selects the module
+// route (defaults to 'database'); the API authorizes from the comment's own
+// root resource, so any comment can be updated or removed.
+await ledgo.comments.update(commentId, 'New body text', 'kanban');
+await ledgo.comments.remove(commentId, 'kanban');
 ```
 
 ## Storage
