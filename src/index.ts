@@ -894,8 +894,8 @@ export interface IImageConfig {
   src: string;
   /** Alternative text for accessibility and fallback display. */
   alt: string;
-  /** CSS object-fit mode: "cover", "contain", or "fill". */
-  fit: "cover" | "contain" | "fill";
+  /** CSS object-fit mode: "cover", "contain", "fill", or "scroll". "scroll" keeps the natural height and enables vertical scrolling. */
+  fit: "cover" | "contain" | "fill" | "scroll";
   /** Whether to apply rounded corners to the image. */
   rounded: boolean;
 }
@@ -1342,22 +1342,33 @@ export interface ICreateDiagramPayload extends Pick<IDiagram, 'name' | 'code'>, 
 export interface ICreateDatabasePayload extends Pick<IDatabase, 'name'>, Partial<Pick<IDatabase, 'description' | 'schema' | 'uiSchema'>> { }
 
 /**
- * Fine-grained element a comment is anchored to. v1 supports databases:
- * the database itself, one of its columns, a record or a single cell.
- * v2 adds document blocks.
+ * Kind of root resource a comment is anchored to. It matches the resource
+ * vocabulary used by the API (`database`, `kanban`, `form`, `document`).
+ */
+export type CommentRootType = 'database' | 'kanban' | 'form' | 'document';
+
+/**
+ * Fine-grained element a comment is anchored to. The supported kinds depend on
+ * the root resource: databases anchor to the database itself, a column, a
+ * record or a cell; kanbans anchor to a card; forms anchor to a response; and
+ * documents anchor to a block.
  */
 export interface ICommentTarget {
   /** Kind of the commented element. */
-  kind: 'database' | 'column' | 'record' | 'cell' | 'block';
+  kind: 'database' | 'column' | 'record' | 'cell' | 'card' | 'response' | 'block';
   /** Identifier of the record, required for record and cell comments. */
   recordId?: string;
   /** Name of the schema property, required for column and cell comments. */
   field?: string;
+  /** Identifier of the kanban card, required for card comments. */
+  cardId?: string;
+  /** Identifier of the form response, required for response comments. */
+  responseId?: string;
   /** Identifier of the document block, required for block comments. */
   blockId?: string;
 }
 
-/** A single comment anchored to a database target. */
+/** A single comment anchored to a root resource target. */
 export interface IComment {
   /** Unique identifier of the comment. */
   id: string;
@@ -1366,7 +1377,7 @@ export interface IComment {
   /** Project that owns the root resource. */
   projectId: string;
   /** Kind of the root resource. */
-  rootResourceType: string;
+  rootResourceType: CommentRootType;
   /** Identifier of the root resource. */
   rootResourceId: string;
   /** Fine-grained target the comment is anchored to. */
@@ -2306,7 +2317,7 @@ export class LedGoSDK {
   public diagrams: DiagramsModule;
   /** Module for managing project documents and their blocks. */
   public documents: DocumentsModule;
-  /** Module for the cross-cutting comments layer anchored to databases. */
+  /** Module for the cross-cutting comments layer (databases, kanbans, forms and documents). */
   public comments: CommentsModule;
   /** Module for managing home dashboard widgets. */
   public widgets: WidgetsModule;
@@ -2795,57 +2806,91 @@ class DatabasesModule {
   }
 }
 
+/** Module route that handles the edit/delete of a comment by id. */
+function commentByIdRoute(rootType: CommentRootType): string {
+  return `/${rootType}s/comments`;
+}
+
 /**
  * Handles the cross-cutting comments layer. Comments are not a standalone
- * module: they are anchored to a root resource (database or document) and to
- * one of its sub-targets. Reading and creating require view access on the root
- * resource; editing and deleting only affect own comments.
+ * module: they are anchored to a root resource (database, kanban, form or
+ * document) and to one of its sub-targets. Reading and creating require view
+ * access on the root resource; editing and deleting only affect own comments.
  */
 class CommentsModule {
   constructor(private client: HttpClient) { }
 
   /** Lists the comments of a database, optionally filtered to one target key. */
   async listForDatabase(databaseId: string, targetKey?: string): Promise<IComment[]> {
-    const query = targetKey ? `?target_key=${encodeURIComponent(targetKey)}` : '';
-    const { data } = await this.client.get(`/databases/${databaseId}/comments${query}`);
-
-    return data;
+    return this.list(`/databases/${databaseId}/comments`, targetKey);
   }
 
   /** Creates a top-level comment or a reply anchored to a database target. */
   async createForDatabase(databaseId: string, payload: ICreateCommentPayload): Promise<IComment> {
-    const requestPayload = toSnakeCase(payload);
-    const { data } = await this.client.post(`/databases/${databaseId}/comments`, requestPayload);
+    return this.create(`/databases/${databaseId}/comments`, payload);
+  }
 
-    return data;
+  /** Lists the comments of a kanban dashboard, optionally filtered to one target key. */
+  async listForKanban(dashboardId: string, targetKey?: string): Promise<IComment[]> {
+    return this.list(`/kanbans/dashboards/${dashboardId}/comments`, targetKey);
+  }
+
+  /** Creates a top-level comment or a reply anchored to a kanban card. */
+  async createForKanban(dashboardId: string, payload: ICreateCommentPayload): Promise<IComment> {
+    return this.create(`/kanbans/dashboards/${dashboardId}/comments`, payload);
+  }
+
+  /** Lists the comments of a form, optionally filtered to one target key. */
+  async listForForm(formId: string, targetKey?: string): Promise<IComment[]> {
+    return this.list(`/forms/${formId}/comments`, targetKey);
+  }
+
+  /** Creates a top-level comment or a reply anchored to a form response. */
+  async createForForm(formId: string, payload: ICreateCommentPayload): Promise<IComment> {
+    return this.create(`/forms/${formId}/comments`, payload);
   }
 
   /** Lists the comments of a document, optionally filtered to one target key. */
   async listForDocument(documentId: string, targetKey?: string): Promise<IComment[]> {
-    const query = targetKey ? `?target_key=${encodeURIComponent(targetKey)}` : '';
-    const { data } = await this.client.get(`/documents/${documentId}/comments${query}`);
-
-    return data;
+    return this.list(`/documents/${documentId}/comments`, targetKey);
   }
 
   /** Creates a top-level comment or a reply anchored to a document target. */
   async createForDocument(documentId: string, payload: ICreateCommentPayload): Promise<IComment> {
+    return this.create(`/documents/${documentId}/comments`, payload);
+  }
+
+  /**
+   * Updates the body of an owned comment. `rootType` selects the module route
+   * and defaults to `database` for backwards compatibility; the API resolves
+   * the authorization from the comment's own root resource, so any comment can
+   * be updated through its module route.
+   */
+  async update(commentId: string, body: string, rootType: CommentRootType = 'database'): Promise<IComment> {
+    const { data } = await this.client.patch(`${commentByIdRoute(rootType)}/${commentId}`, { body });
+
+    return data;
+  }
+
+  /** Deletes an owned comment. See {@link update} for the `rootType` semantics. */
+  async remove(commentId: string, rootType: CommentRootType = 'database'): Promise<void> {
+    await this.client.delete(`${commentByIdRoute(rootType)}/${commentId}`);
+  }
+
+  /** Lists the comments anchored to a resource path. */
+  private async list(path: string, targetKey?: string): Promise<IComment[]> {
+    const query = targetKey ? `?target_key=${encodeURIComponent(targetKey)}` : '';
+    const { data } = await this.client.get(`${path}${query}`);
+
+    return data;
+  }
+
+  /** Creates a comment or a reply anchored to a resource path. */
+  private async create(path: string, payload: ICreateCommentPayload): Promise<IComment> {
     const requestPayload = toSnakeCase(payload);
-    const { data } = await this.client.post(`/documents/${documentId}/comments`, requestPayload);
+    const { data } = await this.client.post(path, requestPayload);
 
     return data;
-  }
-
-  /** Updates the body of an owned comment. */
-  async update(commentId: string, body: string): Promise<IComment> {
-    const { data } = await this.client.patch(`/databases/comments/${commentId}`, { body });
-
-    return data;
-  }
-
-  /** Deletes an owned comment. */
-  async remove(commentId: string): Promise<void> {
-    await this.client.delete(`/databases/comments/${commentId}`);
   }
 }
 
