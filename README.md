@@ -22,17 +22,17 @@ Requires Node.js with global `fetch` (Node 18+).
 
 ## Getting Started
 
-You need an **Integration Token** (generated in the LedGo organization settings) and, optionally, the **Organization ID**. When the `organizationId` is omitted, the API resolves the organization from the token itself.
+You only need an **Integration Token** (generated in the LedGo organization settings). The SDK targets the stable `https://papi.ledgo.dev` alias by default: API calls go to `https://papi.ledgo.dev/api-v1-new`, while module-specific edge functions use the bare host. The API resolves the organization and project from the token itself.
 
 ```typescript
 import { LedGoSDK } from '@ledgo/sdk';
 
 const ledgo = new LedGoSDK({
-  baseUrl: 'https://api.ledgo.app',
-  organizationId: 'your-org-id', // optional — resolved from the token when omitted
   token: 'prof_your_secure_token',
 });
 ```
+
+Advanced: pass `baseUrl` only when targeting a different deployment. `organizationId` is deprecated and no longer required.
 
 The SDK exposes eight modules: `kanbans`, `forms`, `databases`, `diagrams`, `documents`, `comments`, `widgets`, and `storage`.
 

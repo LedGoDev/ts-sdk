@@ -118,3 +118,44 @@ describe('CommentsModule routes', () => {
     expect(requests[0].url).toBe(`${BASE_URL}/forms/comments/comment-1`);
   });
 });
+
+describe('API base URL resolution', () => {
+  let requests: ICapturedRequest[];
+
+  beforeEach(() => {
+    requests = mockFetch();
+  });
+
+  it('appends the gateway slug to the default alias host', async () => {
+    const sdk = new LedGoSDK({ token: 'test-token' });
+
+    await sdk.kanbans.listDashboards();
+
+    expect(requests[0].url).toBe('https://papi.ledgo.dev/api-v1-new/kanbans/dashboards');
+  });
+
+  it('does not duplicate the gateway slug when it is already present', async () => {
+    const sdk = new LedGoSDK({
+      baseUrl: 'https://papi.ledgo.dev/api-v1-new',
+      token: 'test-token',
+    });
+
+    await sdk.kanbans.listDashboards();
+
+    expect(requests[0].url).toBe('https://papi.ledgo.dev/api-v1-new/kanbans/dashboards');
+  });
+
+  it('keeps custom API base URLs unchanged', async () => {
+    const sdk = new LedGoSDK({ baseUrl: BASE_URL, token: 'test-token' });
+
+    await sdk.kanbans.listDashboards();
+
+    expect(requests[0].url).toBe(`${BASE_URL}/kanbans/dashboards`);
+  });
+
+  it('uses the bare alias host for module-specific edge functions', () => {
+    const sdk = new LedGoSDK({ token: 'test-token' });
+
+    expect(sdk.forms.getFormSessionUrl()).toBe('https://papi.ledgo.dev/form-session');
+  });
+});
