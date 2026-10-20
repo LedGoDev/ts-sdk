@@ -144,15 +144,27 @@ function toCamelCase(value: any): any {
 }
 
 /**
+ * Hosts that alias the InsForge edge functions. Requests to these hosts are
+ * proxied to the current functions origin, so they stay stable across backend
+ * migrations.
+ */
+const FUNCTIONS_ALIAS_HOSTS: readonly string[] = ['papi.ledgo.dev'];
+
+/**
  * Derives the edge functions base URL from the API base URL.
  * API base pattern:    https://{appKey}.{region}.insforge.app
  * Functions pattern:   https://{appKey}.function2.insforge.app
+ * Alias pattern:       https://papi.ledgo.dev (stable, proxied)
  * Returns undefined for non-insforge.app hosts (callers fall back to the
  * gateway proxy path).
  */
 function deriveFunctionsBaseUrl(apiBaseUrl: string): string | undefined {
   try {
-    const { hostname } = new URL(apiBaseUrl);
+    const { hostname, origin } = new URL(apiBaseUrl);
+
+    if (FUNCTIONS_ALIAS_HOSTS.includes(hostname)) {
+      return origin;
+    }
 
     if (!hostname.endsWith('.insforge.app')) {
       return undefined;
@@ -166,18 +178,57 @@ function deriveFunctionsBaseUrl(apiBaseUrl: string): string | undefined {
   }
 }
 
+/** Edge function slug of the LedGo API gateway. */
+const API_GATEWAY_SLUG = 'api-v1-new';
+
+/**
+ * Default LedGo host. It is the stable `papi.ledgo.dev` alias for every
+ * InsForge edge function, so callers never need to know the generated
+ * `<appKey>.function2.insforge.app` host.
+ *
+ * The SDK appends `api-v1-new` automatically for API calls, while
+ * module-specific edge functions (e.g. `form-session`) use the bare host.
+ */
+export const DEFAULT_LEDGO_BASE_URL = "https://papi.ledgo.dev";
+
+/**
+ * Resolves the API gateway base URL from a configured base URL.
+ *
+ * A bare alias host (e.g. `https://papi.ledgo.dev`) gets the `api-v1-new`
+ * gateway slug appended. An explicit path (e.g.
+ * `https://papi.ledgo.dev/api-v1-new`) is preserved, as are non-alias hosts
+ * for backward compatibility.
+ */
+function resolveApiBaseUrl(baseUrl: string): string {
+  try {
+    const { hostname, origin, pathname } = new URL(baseUrl);
+    const isBareAliasHost =
+      FUNCTIONS_ALIAS_HOSTS.includes(hostname) &&
+      (pathname === '' || pathname === '/');
+
+    if (isBareAliasHost) {
+      return `${origin}/${API_GATEWAY_SLUG}`;
+    }
+
+    return baseUrl.replace(/\/+$/, '');
+  } catch {
+    return baseUrl;
+  }
+}
+
 /**
  * Configuration options for initializing the LedGo SDK.
  */
 export interface ILedGoConfig {
-  /** Base URL of the LedGo API (e.g. https://api.ledgo.ai). */
-  baseUrl: string;
   /** Integration token generated in the organization settings. Used for Bearer authentication. */
   token: string;
+  /** Optional API base URL. Defaults to `DEFAULT_LEDGO_BASE_URL`; both the bare alias host and the full gateway URL are accepted. */
+  baseUrl?: string;
   /**
-   * Optional unique identifier of the organization. When omitted, the API
-   * resolves the organization from the token itself, so the SDK does not need
-   * it to scope its operations.
+   * Optional legacy organization identifier. The API resolves the organization
+   * from the token, so this is only needed against legacy deployments.
+   *
+   * @deprecated Omit it; the integration token already scopes every request.
    */
   organizationId?: string;
 }
@@ -2296,11 +2347,7 @@ export function widgetsToContent(widgets: IWidgetLikeWithPosition[], options: IW
  *
  * @example
  * ```ts
- * const sdk = new LedGoSDK({
- *   baseUrl: 'https://api.ledgo.ai',
- *   token: 'your-integration-token',
- *   organizationId: 'org-123'
- * });
+ * const sdk = new LedGoSDK({ token: 'your-integration-token' });
  * ```
  */
 export class LedGoSDK {
@@ -2325,16 +2372,17 @@ export class LedGoSDK {
   public storage: StorageModule;
 
   constructor(config: ILedGoConfig) {
-    const baseUrl = config.organizationId
-      ? `${config.baseUrl}/organizations/${config.organizationId}`
-      : config.baseUrl;
+    const baseUrl = resolveApiBaseUrl(config.baseUrl ?? DEFAULT_LEDGO_BASE_URL);
+    const scopedBaseUrl = config.organizationId
+      ? `${baseUrl}/organizations/${config.organizationId}`
+      : baseUrl;
 
-    this.client = new HttpClient(baseUrl, {
+    this.client = new HttpClient(scopedBaseUrl, {
       'Authorization': `Bearer ${config.token}`,
       'Content-Type': 'application/json'
     });
 
-    this.publicClient = new HttpClient(config.baseUrl, {
+    this.publicClient = new HttpClient(baseUrl, {
       'Content-Type': 'application/json'
     });
 

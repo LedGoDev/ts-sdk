@@ -9,17 +9,15 @@ dotenv.config();
 
 describe('LedGoSDK (Live Tests)', () => {
   const config = {
-    baseUrl: process.env.MONDA_BASE_URL || '',
-    organizationId: process.env.MONDA_ORG_ID || '',
+    ...(process.env.MONDA_BASE_URL ? { baseUrl: process.env.MONDA_BASE_URL } : {}),
+    ...(process.env.MONDA_ORG_ID ? { organizationId: process.env.MONDA_ORG_ID } : {}),
     token: process.env.MONDA_TOKEN || ''
   };
 
-  if (!config.baseUrl || !config.organizationId || !config.token) {
-    console.warn('Live tests skipped: Missing configuration in .env');
+  if (!config.token) {
+    console.warn('Live tests skipped: Missing MONDA_TOKEN in .env');
     it('should be configured', () => {
-      expect(config.baseUrl).toBeDefined();
-      expect(config.organizationId).toBeDefined();
-      expect(config.token).toBeDefined();
+      expect(config.token).not.toBe('');
     });
     return;
   }
@@ -1237,7 +1235,7 @@ describe('LedGoSDK (Live Tests)', () => {
   });
 
   describe('Documents Module', () => {
-    const isDocumentsConfigured = config.baseUrl && config.organizationId && config.token;
+    const isDocumentsConfigured = Boolean(config.token);
 
     if (!isDocumentsConfigured) {
       it('should be configured', () => {
@@ -1484,6 +1482,12 @@ describe('LedGoSDK (Live Tests)', () => {
 });
 
 describe('Form session URL derivation (no network)', () => {
+  it('defaults to the stable LedGo API alias when only the token is provided', () => {
+    const sdk = new LedGoSDK({ token: 'prof_x' });
+
+    expect(sdk.forms.getFormSessionUrl()).toBe('https://papi.ledgo.dev/form-session');
+  });
+
   it('derives the functions URL for insforge.app hosts', () => {
     const sdk = new LedGoSDK({
       baseUrl: 'https://m3c9h4c8.us-east.insforge.app',
@@ -1491,6 +1495,24 @@ describe('Form session URL derivation (no network)', () => {
     });
 
     expect(sdk.forms.getFormSessionUrl()).toBe('https://m3c9h4c8.function2.insforge.app/form-session');
+  });
+
+  it('uses the stable functions alias for papi.ledgo.dev hosts', () => {
+    const sdk = new LedGoSDK({
+      baseUrl: 'https://papi.ledgo.dev/api-v1-new',
+      token: 'prof_x'
+    });
+
+    expect(sdk.forms.getFormSessionUrl()).toBe('https://papi.ledgo.dev/form-session');
+  });
+
+  it('accepts the bare papi.ledgo.dev host and appends the gateway for API calls', () => {
+    const sdk = new LedGoSDK({
+      baseUrl: 'https://papi.ledgo.dev',
+      token: 'prof_x'
+    });
+
+    expect(sdk.forms.getFormSessionUrl()).toBe('https://papi.ledgo.dev/form-session');
   });
 
   it('builds the read URL by session token', () => {
